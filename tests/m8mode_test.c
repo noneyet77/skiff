@@ -119,6 +119,48 @@ int main(void)
     press(B_OCTDN);
     clear();
 
+    press(B_SCL);
+    blk();
+    m8check("a tap of SEL sends nothing", evn == 0u);
+    btn_down(B_SCL);
+    fr();
+    press(B_OCTUP);
+    blk();
+    press(B_OCTUP);
+    blk();
+    btn_up(B_SCL);
+    fr();
+    m8check("SEL + OCT+ twice: the keys on channel 3, kept with the settings, the octave as it was",
+            m8_kch() == 2u && favorites.factory[15][29] == (0x80u | 2u) && m8_oct == 0 && evn == 0u);
+    fm1_in.notes = 1u;
+    blk();
+    m8check(".. the lowest key: note 53 on channel 3", has(0x92, 53, 100));
+    btn_down(B_SCL);
+    fr();
+    for (int i = 0; i < 20; i++) {
+        press(B_OCTUP);
+        blk();
+    }
+    btn_up(B_SCL);
+    fr();
+    fm1_in.notes = 0;
+    blk();
+    m8check(".. let go after the channel moved: its note off still on channel 3", has(0x82, 53, 0));
+    m8check(".. and the channel stops at 16", m8_kch() == 15u);
+    btn_down(B_SCL);
+    fr();
+    for (int i = 0; i < 20; i++) {
+        press(B_OCTDN);
+        blk();
+    }
+    btn_up(B_SCL);
+    fr();
+    m8check("SEL + OCT- back down: channel 1 again", m8_kch() == 0u);
+    favorites.factory[15][29] = 30u;
+    m8check("an older STYLE value in that byte reads as channel 1", m8_kch() == 0u);
+    favorites.factory[15][29] = 0x80u;
+    clear();
+
     turn(EN_K2, 100);
     blk();
     m8check("a fast turn of 100: split in messages of 63 at most (CC 24 = 63, then 37)", has(0xBF, 24, 63) && has(0xBF, 24, 37));

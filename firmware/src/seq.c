@@ -1147,10 +1147,19 @@ static void kb_outer(void)
 /* the keys' changes, once a block. ((2.2) Not inlined, and measured on its own (tests/target_budget.py): its loop over
  * the 27 keys (which runs only when one changed) laid out inside the audio ISR's own made that ISR's static cost jump
  * with every small change in what it inlines (#74; a key's note to MIDI OUT here) */
-/* (M8 MODE, m8mode.c) the keys as notes on MIDI channel 1 for an M8: F3 + the key, m8_oct octaves away; nothing sounds
- * here. m8_kn: the note each held key sent (its note off, whatever the octave is by then) */
+/* (M8 MODE, m8mode.c) the keys as notes for an M8 on m8_kch's channel (1 unless set: SEL + OCT- / OCT+): F3 + the key,
+ * m8_oct octaves away; nothing sounds here. m8_kn, m8_kc: the note and channel each held key sent (its note off, whatever
+ * the octave or channel is by then) */
 static int8_t m8_oct;
-static uint8_t m8_kn[27];
+static uint8_t m8_kn[27], m8_kc[27];
+/* the keys' channel, 0..15: favorites.factory[15][29], the retired STYLE byte, as 0x80 | channel (a value saved before,
+ * bit 7 clear, is channel 1) */
+#define M8_KCH_SET 0x80u
+static uint32_t m8_kch(void)
+{
+    uint32_t v = MSET(15, 29);
+    return (v & M8_KCH_SET) ? v & 15u : 0u;
+}
 static uint32_t m8_kon;
 static void m8_keys(uint32_t cur, uint32_t ch)
 {
@@ -1164,11 +1173,12 @@ static void m8_keys(uint32_t cur, uint32_t ch)
             if (n < 0 || n > 127)
                 continue;
             m8_kn[k] = (uint8_t)n;
+            m8_kc[k] = (uint8_t)m8_kch();
             m8_kon |= 1u << k;
-            (void)mo_put(0x09u | 0x90u << 8 | (uint32_t)n << 16 | 100u << 24, mo.tick);
+            (void)mo_put(0x09u | (0x90u | m8_kc[k]) << 8 | (uint32_t)n << 16 | 100u << 24, mo.tick);
         } else if ((m8_kon >> k) & 1u) {
             m8_kon &= ~(1u << k);
-            (void)mo_put(0x08u | 0x80u << 8 | (uint32_t)m8_kn[k] << 16, mo.tick);
+            (void)mo_put(0x08u | (0x80u | m8_kc[k]) << 8 | (uint32_t)m8_kn[k] << 16, mo.tick);
         }
     }
 }

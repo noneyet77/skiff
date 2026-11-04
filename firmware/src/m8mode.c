@@ -7,6 +7,7 @@
  *   encoders  CC M8_CC0 + the role (panel.c EN_SELECT .. EN_K4; 20 .. 26) on channel 16, relative: 1..63 a turn
  *             clockwise, 127..65 anticlockwise (two's complement), one step a detent.
  *   keys      notes on channel 1 (seq.c m8_keys, in the audio ISR as the keys always are), F3 + the key, velocity 100.
+ *   SEL       held: OCT- / OCT+ step the keys' MIDI channel (1..16), kept with the settings (seq.c m8_kch).
  *   FX        switches KNOB 1..4 to the FX page and back: there they send absolute CCs M8_FX_CC0 .. +3 on channel 16
  *             (0..127, M8_FX_STEP a detent, each knob keeping its value), for the M8's PROJECT > MIDI > MAPPINGS to
  *             tie to an effect send, a filter, a mod; m8emu passes CCs it has no mapping for to the M8.
@@ -19,13 +20,14 @@
 #define M8_OCT_MAX 4
 #define M8_FX_CC0 70u
 #define M8_FX_STEP 2
-static const char *const M8_BTN_MAP[NB] = {"FX PAGE", "", "UP", "SHIFT", "EDIT", "OPTION", "MENU", "LEFT",
+static const char *const M8_BTN_MAP[NB] = {"FX PAGE", "KEY CH", "UP", "SHIFT", "EDIT", "OPTION", "MENU", "LEFT",
                                            "DOWN", "RIGHT", "PLAY", "", "OCT-", "OCT+"};
 static const char *const M8_ENC_MAP[NE] = {"CURSOR U/D", "CURSOR L/R", "", "VALUE", "VALUE +16", "SCREEN U/D",
                                            "SCREEN L/R"};
 
 static struct {
     uint8_t was_on, dirty;
+    uint8_t sel;                                        /* SEL held: OCT- / OCT+ change the keys' channel */
     uint8_t fx;                                         /* KNOB 1..4 on the FX page */
     uint8_t fx_val[4];                                  /* their values there, as last sent */
     uint8_t fx_init;
@@ -46,7 +48,19 @@ static void m8_button(uint32_t b, int down)
 {
     if (b >= NB)
         return;
+    if (b == B_SCL) {                                   /* SEL: no note, a modifier for OCT- / OCT+ */
+        m8.sel = (uint8_t)down;
+        return;
+    }
     if (b == B_OCTDN || b == B_OCTUP) {
+        if (down && m8.sel) {                           /* SEL held: the keys' channel, 1..16 */
+            int32_t c = (int32_t)m8_kch() + (b == B_OCTUP ? 1 : -1);
+            c = c < 0 ? 0 : c > 15 ? 15 : c;
+            favorites.factory[15][29] = (uint8_t)(M8_KCH_SET | (uint32_t)c);
+            settings_later();                           /* written once the panel rests or the MENU opens */
+            m8.dirty = 1;
+            return;
+        }
         if (down) {
             int32_t o = m8_oct + (b == B_OCTUP ? 1 : -1);
             m8_oct = (int8_t)(o < M8_OCT_MIN ? M8_OCT_MIN : o > M8_OCT_MAX ? M8_OCT_MAX : o);
@@ -159,6 +173,7 @@ static void m8_leave(void)
             m8_send(0x08u | (0x80u | M8_CH_CTL) << 8 | (M8_NOTE0 + b) << 16);
     m8.prev = 0;
     m8.was_on = 0;
+    m8.sel = 0;
 }
 
 /* ---- the screen: the panel's map, drawn again when something changes ---- */
@@ -207,12 +222,18 @@ static void m8_draw(void)
         } else if (ui.force)
             m8_cell(i * 60u, 30u, 60u, E_NAME[EN_K1 + i], M8_ENC_MAP[EN_K1 + i]);
     }
-    str_cpy(t, "KEYS OCT ", sizeof t);
-    t[9] = (char)(m8_oct < 0 ? '-' : '+');
-    t[10] = (char)('0' + (m8_oct < 0 ? -m8_oct : m8_oct));
-    t[11] = 0;
-    draw_text_line(0, 202, 110, &AF_S, t, T_TEXT, T_BG, 0);
-    draw_text_line(110, 202, 130, &AF_S, m8.last[0] ? m8.last : "", T_THEME, T_BG, 2);
+    {
+        uint32_t c = m8_kch() + 1u;
+        str_cpy(t, "KEYS CH", sizeof t);
+        t[7] = (char)(c >= 10u ? '1' : ' ');
+        t[8] = (char)('0' + c % 10u);
+        str_cpy(&t[9], " OCT ", sizeof t - 9u);
+        t[14] = (char)(m8_oct < 0 ? '-' : '+');
+        t[15] = (char)('0' + (m8_oct < 0 ? -m8_oct : m8_oct));
+        t[16] = 0;
+    }
+    draw_text_line(0, 202, 130, &AF_S, t, T_TEXT, T_BG, 0);
+    draw_text_line(130, 202, 110, &AF_S, m8.last[0] ? m8.last : "", T_THEME, T_BG, 2);
     ui.force = 0;
     m8.dirty = 0;
 }
