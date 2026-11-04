@@ -2115,6 +2115,12 @@ static void ui_input(void)
                                                          * its map has gone) */
     midi_pc_poll();                                     /* ((1.3) MIDI Program Change) */
     ml_poll();                                          /* ((1.3) MIDI LEARN: a CC came for the picked parameter) */
+    if (m8_active() && !ui.menu) {                      /* M8 MODE: the panel is an M8's (m8mode.c) */
+        m8_input(pressed);
+        return;
+    }
+    if (m8.was_on)                                      /* (M8 MODE: the MENU opened or it went off: let go) */
+        m8_leave();
     if (scr_input(pressed, notes)) {                    /* MENU > SCREEN OFF: dark, or the wake gesture: swallowed */
         if (((pressed >> panel.btn[B_PLAY]) & 1u) && (song.playing || seq_counting()))
             transport_req = 2;                          /* (Skiff U1) .. but PLAY still stops the music */

@@ -1147,6 +1147,32 @@ static void kb_outer(void)
 /* the keys' changes, once a block. ((2.2) Not inlined, and measured on its own (tests/target_budget.py): its loop over
  * the 27 keys (which runs only when one changed) laid out inside the audio ISR's own made that ISR's static cost jump
  * with every small change in what it inlines (#74; a key's note to MIDI OUT here) */
+/* (M8 MODE, m8mode.c) the keys as notes on MIDI channel 1 for an M8: F3 + the key, m8_oct octaves away; nothing sounds
+ * here. m8_kn: the note each held key sent (its note off, whatever the octave is by then) */
+static int8_t m8_oct;
+static uint8_t m8_kn[27];
+static uint32_t m8_kon;
+static void m8_keys(uint32_t cur, uint32_t ch)
+{
+    uint32_t k;
+    for (k = 0; k < 27u; k++) {
+        if (!((ch >> k) & 1u))
+            continue;
+        if ((cur >> k) & 1u) {
+            int32_t n = 53 + (int32_t)k + 12 * m8_oct;
+            kb_note[k] = KB_SILENT;                     /* (M8 MODE turned off while held: its release is silent) */
+            if (n < 0 || n > 127)
+                continue;
+            m8_kn[k] = (uint8_t)n;
+            m8_kon |= 1u << k;
+            (void)mo_put(0x09u | 0x90u << 8 | (uint32_t)n << 16 | 100u << 24, mo.tick);
+        } else if ((m8_kon >> k) & 1u) {
+            m8_kon &= ~(1u << k);
+            (void)mo_put(0x08u | 0x80u << 8 | (uint32_t)m8_kn[k] << 16, mo.tick);
+        }
+    }
+}
+
 static __attribute__((noinline)) void keyboard_block(void)
 {
     uint32_t cur = fm1_in.notes, ch, k;
@@ -1155,6 +1181,14 @@ static __attribute__((noinline)) void keyboard_block(void)
     kb_outer();
 #endif
     ch = cur ^ kb_prev;                           /* keys also sound while entering steps */
+    if (MSET(15, 17) & MO_M8_ON) {                /* (M8 MODE) the keys go out as MIDI notes, none sounds */
+        if (ch)
+            m8_keys(cur, ch);
+        kb_prev = cur;
+        return;
+    }
+    if (m8_kon)                                   /* (M8 MODE turned off with keys held: their notes end) */
+        m8_keys(0, m8_kon);
     if (!ch)
         return;
     if (kb_boot_hold) {                           /* #137: under the splash; their release is silent too */
@@ -1216,7 +1250,8 @@ static __attribute__((noinline)) void keyboard_block(void)
  * beat, while stopped too (the gear that follows knows the tempo), Stop when it stops. The pulses keep the sequencer's
  * own grid: six to its 1/16 (div_samples, as the steps, the click and the launch points), each at its sample in the
  * block (mo_block_begin / mo_block_end). An external clock (MENU > CLOCK USB or TRS): none, the clock is someone else's */
-static int clock_out(void) { return !song.g[G_CLOCK] && !(MSET(15, 17) & MO_CLOCK_OFF); }
+/* (M8 MODE: no clock either; an M8 that follows MIDI clock would take the FM-1's tempo) */
+static int clock_out(void) { return !song.g[G_CLOCK] && !(MSET(15, 17) & (MO_CLOCK_OFF | MO_M8_ON)); }
 static void mo_rt(uint32_t b, uint32_t due) { (void)mo_put(0x0Fu | b << 8, due); }
 
 static void seq_start(void)

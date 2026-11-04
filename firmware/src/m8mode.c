@@ -1,0 +1,168 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* MENU > MIDI > M8 MODE: the FM-1 as a controller for a Dirtywave M8 (m8emu's MIDI MAPPING, or anything that maps MIDI
+ * to the M8's buttons). While it is ON the panel plays no sound of its own and the screen shows the map:
+ *
+ *   buttons   a note on MIDI channel 16 while held: M8_NOTE0 + the label's index (panel.c B_FX .. B_REC; 36 .. 47).
+ *             HOME opens the MENU (to turn M8 MODE off); OCT- / OCT+ move the keys an octave.
+ *   encoders  CC M8_CC0 + the role (panel.c EN_SELECT .. EN_K4; 20 .. 26) on channel 16, relative: 1..63 a turn
+ *             clockwise, 127..65 anticlockwise (two's complement), one step a detent.
+ *   keys      notes on channel 1 (seq.c m8_keys, in the audio ISR as the keys always are), F3 + the key, velocity 100.
+ *
+ * M8_MAP is the layout m8emu loads for this unit (its FM-1 preset: hosts/sdl/common/midi_map.c); the screen draws it. */
+#define M8_CH_CTL 15u                                   /* channel 16 */
+#define M8_NOTE0 36u
+#define M8_CC0 20u
+#define M8_OCT_MIN (-4)
+#define M8_OCT_MAX 4
+static const char *const M8_BTN_MAP[NB] = {"", "", "UP", "SHIFT", "EDIT", "OPTION", "MENU", "LEFT",
+                                           "DOWN", "RIGHT", "PLAY", "", "OCT-", "OCT+"};
+static const char *const M8_ENC_MAP[NE] = {"CURSOR U/D", "CURSOR L/R", "", "VALUE", "VALUE +16", "SCREEN U/D",
+                                           "SCREEN L/R"};
+
+static struct {
+    uint8_t was_on, dirty;
+    uint32_t prev;                                      /* the matrix buttons held, as last sent */
+    char last[24];                                      /* the last control used, for the screen */
+} m8;
+
+static int m8_active(void) { return (MIDI_BYTE & MO_M8_ON) != 0u; }
+
+static void m8_send(uint32_t pkt)                       /* from the main loop: as cc_knob, behind what the ISR queued */
+{
+    fm1_irq_off();
+    (void)mo_put(pkt, mo.now);
+    fm1_irq_on();
+}
+
+static void m8_button(uint32_t b, int down)
+{
+    if (b >= NB)
+        return;
+    if (b == B_OCTDN || b == B_OCTUP) {
+        if (down) {
+            int32_t o = m8_oct + (b == B_OCTUP ? 1 : -1);
+            m8_oct = (int8_t)(o < M8_OCT_MIN ? M8_OCT_MIN : o > M8_OCT_MAX ? M8_OCT_MAX : o);
+            m8.dirty = 1;
+        }
+        return;
+    }
+    if (b == B_HOME) {                                  /* the way out: the MENU, where M8 MODE is */
+        if (down) {
+            ui.msg_t = 0;
+            ui.menu = 1;
+            ui.confirm = 0;
+            ui.force = 1;
+        }
+        return;
+    }
+    m8_send(down ? 0x09u | (0x90u | M8_CH_CTL) << 8 | (M8_NOTE0 + b) << 16 | 127u << 24
+                 : 0x08u | (0x80u | M8_CH_CTL) << 8 | (M8_NOTE0 + b) << 16);
+    if (down) {
+        str_cpy(m8.last, M8_BTN_MAP[b][0] ? M8_BTN_MAP[b] : B_NAME[b], sizeof m8.last);
+        m8.dirty = 1;
+    }
+}
+
+static void m8_enc(uint32_t role, int32_t s)
+{
+    while (s) {                                         /* at most 63 steps a message */
+        int32_t n = s > 63 ? 63 : s < -63 ? -63 : s;
+        m8_send(0x0Bu | (0xB0u | M8_CH_CTL) << 8 | (M8_CC0 + role) << 16 | (uint32_t)(n & 127) << 24);
+        s -= n;
+    }
+    str_cpy(m8.last, M8_ENC_MAP[role][0] ? M8_ENC_MAP[role] : E_NAME[role], sizeof m8.last);
+    m8.dirty = 1;
+}
+
+static void m8_leave(void);
+/* ui_input: the panel while M8 MODE is on and the MENU closed. pressed: this frame's press edges (matrix bits), so a
+ * tap shorter than a frame still sends its note on and off */
+static void m8_input(uint32_t pressed)
+{
+    uint32_t cur = fm1_in.buttons, id, r;
+    if (!m8.was_on) {                                   /* just turned on (or back from the MENU): from what is held */
+        m8.was_on = 1;
+        m8.prev = cur;
+        m8.last[0] = 0;
+        ui.force = 1;
+        pressed = 0;
+    }
+    for (id = 0; id < 32u; id++) {
+        uint32_t bit = 1u << id, now_on = (cur & bit) != 0u, was = (m8.prev & bit) != 0u, b;
+        if (!((pressed | cur | m8.prev) & bit) || ((b = panel_btn_of(id)) >= NB))
+            continue;
+        if (now_on != was)
+            m8_button(b, (int)now_on);
+        else if (!now_on && (pressed & bit)) {          /* down and up between two frames */
+            m8_button(b, 1);
+            m8_button(b, 0);
+        }
+    }
+    m8.prev = cur;
+    if (ui.menu) {                                      /* HOME opened the MENU: what is held lets go now */
+        m8_leave();
+        return;
+    }
+    for (r = 0; r < NE; r++) {
+        int32_t s = panel_enc(r);
+        if (s)
+            m8_enc(r, s);
+    }
+}
+
+/* the MENU opened or M8 MODE went off: what is held lets go (a note off for each), the next entry starts afresh */
+static void m8_leave(void)
+{
+    uint32_t id, b;
+    for (id = 0; id < 32u; id++)
+        if (((m8.prev >> id) & 1u) && (b = panel_btn_of(id)) < NB && b != B_HOME && b != B_OCTDN && b != B_OCTUP)
+            m8_send(0x08u | (0x80u | M8_CH_CTL) << 8 | (M8_NOTE0 + b) << 16);
+    m8.prev = 0;
+    m8.was_on = 0;
+}
+
+/* ---- the screen: the panel's map, drawn again when something changes ---- */
+
+static void m8_cell(uint32_t x, uint32_t y, uint32_t w, const char *label, const char *what)
+{
+    lcd_fill(x + 1u, y, w - 2u, 36u, T_BG);
+    if (what[0]) {                                      /* a mapped control: outlined */
+        lcd_fill(x + 1u, y, w - 2u, 1u, T_DIM);
+        lcd_fill(x + 1u, y + 35u, w - 2u, 1u, T_DIM);
+        lcd_fill(x + 1u, y, 1u, 36u, T_DIM);
+        lcd_fill(x + w - 2u, y, 1u, 36u, T_DIM);
+    }
+    draw_text_line(x + 2u, y + 3u, w - 4u, &AF_S, label, what[0] ? T_TEXT : T_DIM, T_BG, 1);
+    draw_text_line(x + 2u, y + 19u, w - 4u, &AF_S, what[0] ? what : "-", what[0] ? T_THEME : T_DIM, T_BG, 1);
+}
+
+static void m8_draw(void)
+{
+    static const uint8_t ROW1[6] = {B_FX, B_SCL, B_ENV, B_LFO, B_EDIT, B_GLO};
+    static const uint8_t ROW2[6] = {B_HOME, B_SAVE, B_ARP, B_SEQ, B_PLAY, B_REC};
+    char t[24];
+    uint32_t i;
+    if (!ui.force && !m8.dirty)
+        return;
+    if (ui.force) {
+        lcd_fill(0, 0, 240, 240, T_BG);
+        draw_text_line(0, 6, 240, &AF_M, "M8 MODE", T_THEME, T_BG, 1);
+        for (i = 0; i < 4u; i++)                        /* KNOB 1..4, as on the panel */
+            m8_cell(i * 60u, 30u, 60u, E_NAME[EN_K1 + i], M8_ENC_MAP[EN_K1 + i]);
+        m8_cell(0, 72u, 120u, E_NAME[EN_SELECT], M8_ENC_MAP[EN_SELECT]);
+        m8_cell(120u, 72u, 120u, E_NAME[EN_ALGO], M8_ENC_MAP[EN_ALGO]);
+        for (i = 0; i < 6u; i++) {
+            m8_cell(i * 40u, 120u, 40u, B_NAME[ROW1[i]], M8_BTN_MAP[ROW1[i]]);
+            m8_cell(i * 40u, 160u, 40u, B_NAME[ROW2[i]], M8_BTN_MAP[ROW2[i]]);
+        }
+        draw_text_line(0, 224, 240, &AF_S, "HOME: MENU > MIDI > M8 MODE", T_TEXT, T_BG, 1);
+    }
+    str_cpy(t, "KEYS OCT ", sizeof t);
+    t[9] = (char)(m8_oct < 0 ? '-' : '+');
+    t[10] = (char)('0' + (m8_oct < 0 ? -m8_oct : m8_oct));
+    t[11] = 0;
+    draw_text_line(0, 202, 110, &AF_S, t, T_TEXT, T_BG, 0);
+    draw_text_line(110, 202, 130, &AF_S, m8.last[0] ? m8.last : "", T_THEME, T_BG, 2);
+    ui.force = 0;
+    m8.dirty = 0;
+}

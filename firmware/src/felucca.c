@@ -128,6 +128,7 @@ static inline __attribute__((always_inline)) void *audio_far(void *p) { void *vo
 #include "menu_items.c"          /* MENU's rows and settings (ui_menu.c, editor_menu.c) */
 #include "icons.c"               /* parameter icons (FELUCCA_ICONS), used by ui_draw.c */
 #include "ui_graph.c"
+#include "m8mode.c"              /* MENU > MIDI > M8 MODE: the panel as an M8 controller */
 #include "ui_draw.c"
 #include "ui_menu.c"
 #include "ui_input.c"

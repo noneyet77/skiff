@@ -72,6 +72,7 @@ if (typeof registerProcessor === "function") {
       else if (m.type === "master") ex.web_master(m.value | 0);
       else if (m.type === "midi") ex.web_midi(m.data[0] | 0, m.data[1] | 0, m.data[2] | 0);
       else if (m.type === "visible") this.period = m.on ? 1 / 30 : 1 / 4;
+      else if (m.type === "midiout") { this.midiOut = !!m.on; if (this.midiOut) ex.web_midi_out_on(); }
     }
 
     publish() {
@@ -130,6 +131,14 @@ if (typeof registerProcessor === "function") {
       this.frames += n;
       out[0].set(new Float32Array(ex.memory.buffer, ex.web_out_l(), n));
       if (out[1]) out[1].set(new Float32Array(ex.memory.buffer, ex.web_out_r(), n));
+      if (this.midiOut) {                             // MIDI OUT: each USB-MIDI packet's 1..3 bytes, by its CIN
+        const bytes = [];
+        for (let p; (p = ex.web_midi_out() >>> 0) !== 0;) {
+          const nb = (0x7AFFE7E0 >>> (2 * (p & 15))) & 3;
+          for (let i = 0; i < nb; i++) bytes.push((p >>> (8 + 8 * i)) & 255);
+        }
+        if (bytes.length) this.port.postMessage({ type: "midiout", data: bytes });
+      }
       if (currentTime - this.lastFrame >= this.period) {
         this.lastFrame = currentTime;
         this.publish();

@@ -64,6 +64,7 @@ a { color: inherit; }
 .start button:disabled { opacity: .4; cursor: progress; }
 .start p { margin: 0; max-width: 32em; text-align: center; color: #fff; }
 .keys, footer { margin: 16px 0 0; color: var(--dim); text-align: center; }
+.midiout select { font: inherit; margin-left: 4px; }
 .keys span { white-space: nowrap; margin: 0 8px; }
 kbd { font: 600 11px ui-monospace, Menlo, monospace; border: 1px solid var(--rule); padding: 0 4px; color: var(--fg); }
 footer { margin-top: 12px; font-size: 12px; }
@@ -88,10 +89,15 @@ footer small { font-size: 11px; opacity: .8; }
   <span><kbd>Shift</kbd>-click holds a button</span>
 </p>
 
+<p class="keys midiout">
+  <label>MIDI out <select id="midiout" disabled><option value="">Off</option></select></label>
+  <span>(MENU › MIDI › M8 MODE: the panel as an M8 controller)</span>
+</p>
+
 <footer>
   <small class="version">@VERSION@@PREVIEW@</small><br>
   Skiff by illuminus5, built on Felucca by Leo Kuroshita, Hügelton Instruments · <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> · browser build after charlesvestal's <a href="https://github.com/charlesvestal/fm1-x0x">X0X</a> · DotGothic16 font, <a href="fonts/OFL.txt">SIL OFL 1.1</a><br>
-  Saves stay in this browser. Not here: USB (the editor, MIDI out, audio), the TRS MIDI jack.<br>
+  Saves stay in this browser. Not here: USB (the editor, audio), the TRS MIDI jack. MIDI out goes to the port picked above.<br>
   <nav><a href="../webapp/installer/">Install</a><a href="../webapp/editor/">Editor</a><a href="../learn/">Learn</a><a href="https://github.com/illuminus5/skiff">Source</a></nav>
   <small>M-VAVE and FM-1 are trademarks of their respective owners. Skiff is not affiliated with or endorsed by them.</small>
 </footer>
@@ -347,6 +353,7 @@ function saveFlash(sectors) {
 }
 
 // ------------------------------------------------------------------ Web MIDI in (channel messages)
+let midiOutPort = null;
 async function midiOn() {
   if (!navigator.requestMIDIAccess) return;
   try {
@@ -359,8 +366,19 @@ async function midiOn() {
         };
       }
     };
-    access.onstatechange = bind;
+    const pick = document.getElementById("midiout");
+    const outs = () => {                                          // MIDI OUT: the ports to send to
+      const was = pick.value;
+      pick.length = 1;
+      for (const o of access.outputs.values()) pick.add(new Option(o.name, o.id));
+      pick.value = [...pick.options].some((o) => o.value === was) ? was : "";
+      midiOutPort = pick.value ? access.outputs.get(pick.value) : null;
+      pick.disabled = false;
+    };
+    pick.onchange = () => { midiOutPort = pick.value ? access.outputs.get(pick.value) : null; send({ type: "midiout", on: !!midiOutPort }); };
+    access.onstatechange = () => { bind(); outs(); };
     bind();
+    outs();
   } catch { /* no permission: the panel only */ }
 }
 
@@ -384,6 +402,7 @@ async function switchOn() {
         const m = e.data;
         if (m.type === "ready") res();
         else if (m.type === "error") rej(new Error(m.message));
+        else if (m.type === "midiout") { if (midiOutPort) midiOutPort.send(m.data); }
         else if (m.type === "frame") {
           if (m.fb) drawScreen(m.fb);
           if (m.leds) drawLights(lastLeds = m.leds, m.anim);

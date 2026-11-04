@@ -152,6 +152,7 @@ static void lcd_init(void) {}
 #include "../../firmware/src/menu_items.c"
 #include "../../firmware/src/icons.c"
 #include "../../firmware/src/ui_graph.c"
+#include "../../firmware/src/m8mode.c"
 #include "../../firmware/src/ui_draw.c"
 #include "../../firmware/src/ui_menu.c"
 #include "../../firmware/src/ui_input.c"
@@ -409,6 +410,19 @@ EXPORT void web_render(uint32_t n)
 }
 
 /* the flash: erased, then the page's saved sectors (web_nor), then boot */
+/* MIDI OUT (M8 MODE, NOTES OUT, CLOCK OUT ..): the page asks for it once it has an output to send to (web_midi_out_on:
+ * USB "configured", so usb.c mo_put queues), then takes the queued USB-MIDI packets one by one, due or not (0: none) */
+EXPORT void web_midi_out_on(void) { usb.config = 1; }
+EXPORT uint32_t web_midi_out(void)
+{
+    uint32_t p;
+    if (mo_r == mo_w)
+        return 0;
+    p = midi_out_q[mo_r % MQO];
+    mo_r++;
+    return p;
+}
+
 EXPORT uint8_t *web_nor(void) { return nor; }
 EXPORT uint32_t web_nor_size(void) { return sizeof nor; }
 EXPORT void web_nor_erase(void) { memset(nor, 0xFF, sizeof nor); }
