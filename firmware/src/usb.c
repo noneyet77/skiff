@@ -234,6 +234,8 @@ enum { NO_ALL, NO_KEYS, NO_OFF };                  /* NOTES OUT ([15][17] bits 0
 #define MO_CC_ON 8u                                /* CC OUT ON */
 #define MO_THRU_ON 16u                             /* THRU ON */
 #define MO_M8_ON 32u                               /* M8 MODE ON (m8mode.c) */
+#define MO_M8_TRACK 64u                            /* M8 KEYS TRACK: the keys play the selected track (seq.c) */
+#define MO_M8_SOUND 128u                           /* M8 SOUND ON: the M8's notes play the tracks here (seq.c) */
 static uint32_t mset_ch(uint32_t v) { return v >= 1u && v <= 16u ? v : 0u; }   /* REMOTE, AUTO: 1..16, else OFF (0) */
 
 /* queue an event (a USB-MIDI packet) due at TIMER4 tick due: 0 when the ring is full (nothing changed). The FM-1 with

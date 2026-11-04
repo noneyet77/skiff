@@ -1421,7 +1421,7 @@ static void ui_draw_page(uint32_t counting)
         ui.force = 0;
         return;
     }
-    if (m8_active()) {                                  /* M8 MODE: the panel's map (m8mode.c) */
+    if (m8_panel()) {                                   /* M8 MODE: the panel's map (m8mode.c) */
         m8_draw();
         return;
     }

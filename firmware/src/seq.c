@@ -1154,6 +1154,7 @@ static int8_t m8_oct;
 static uint8_t m8_vel = 100u;                           /* the keys' velocity (PRESET) */
 static uint8_t m8_play, m8_pulse;                       /* the M8 playing (its start / stop), its clock's 24ths of a beat */
 static uint32_t m8_clk_ms;                              /* its last clock */
+static volatile uint8_t m8_panel_on;                    /* the panel is the M8's now (the UI sets it): no layers on the keys */
 static uint8_t m8_kn[27], m8_kc[27];
 /* the keys' channel, 0..15: favorites.factory[15][29], the retired STYLE byte, as 0x80 | channel (a value saved before,
  * bit 7 clear, is channel 1) */
@@ -1194,7 +1195,16 @@ static __attribute__((noinline)) void keyboard_block(void)
     kb_outer();
 #endif
     ch = cur ^ kb_prev;                           /* keys also sound while entering steps */
-    if (MSET(15, 17) & MO_M8_ON) {                /* (M8 MODE) the keys go out as MIDI notes, none sounds */
+    if ((MSET(15, 17) & (MO_M8_ON | MO_M8_TRACK)) == MO_M8_ON) {   /* (M8 MODE, KEYS DIRECT) the keys go out as MIDI
+                                                   * notes, none sounds */
+        if (ch & ~cur & ~m8_kon) {                /* (a key held from KEYS TRACK: let go, its track's note ends) */
+            for (k = 0; k < 27u; k++)
+                if (((ch & ~cur) >> k) & 1u && !((m8_kon >> k) & 1u) && !((kb_layer >> k) & 1u) &&
+                    kb_note[k] != KB_SILENT) {
+                    kb_up(k);
+                    kb_note[k] = KB_SILENT;
+                }
+        }
         if (ch)
             m8_keys(cur, ch);
         kb_prev = cur;
@@ -1213,6 +1223,8 @@ static __attribute__((noinline)) void keyboard_block(void)
     }
     lay = (fm1_in.buttons & kb_mask) || kb_lock;  /* (#83: kb_lock, a layer locked open with no button held) */
     fx = (fm1_in.buttons & perf_mask) || (kb_lock & 2u);
+    if (m8_panel_on)                              /* (M8 MODE, KEYS TRACK, the M8's panel: its buttons open no layer) */
+        lay = fx = 0;
     for (k = 0; k < 27u; k++) {
         if (!((ch >> k) & 1u))
             continue;
@@ -2102,7 +2114,9 @@ static __attribute__((noinline)) void events_block(uint32_t n)
         uint32_t d1 = (pkt >> 16) & 0x7Fu, d2 = (pkt >> 24) & 0x7Fu;
         uint32_t source = midi_in_source[at] ? midi_in_source[at] : 1u, ms = midi_in_ms[at];
         mi_r++;
-        if (MSET(15, 17) & MO_M8_ON) {                /* (M8 MODE) the M8's transport for PLAY's LED, nothing else */
+        if (MSET(15, 17) & MO_M8_ON) {                /* (M8 MODE) the M8's transport for PLAY's LED; its clock and
+                                                   * transport go on to the clock here (CLOCK USB: the sequencer follows
+                                                   * the M8), its notes and CCs only with M8 SOUND ON */
             if (status == 0xFAu || status == 0xFBu) {
                 m8_play = 1;
                 if (status == 0xFAu)
@@ -2113,7 +2127,8 @@ static __attribute__((noinline)) void events_block(uint32_t n)
                 m8_pulse = (uint8_t)(m8_pulse >= 23u ? 0u : m8_pulse + 1u);
                 m8_clk_ms = ms;
             }
-            continue;
+            if (status < 0xF8u && status != 0xF2u && !(MSET(15, 17) & MO_M8_SOUND))
+                continue;
         }
         if (status >= 0xF8u) {
             if (clock_mode == source) {

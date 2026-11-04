@@ -395,7 +395,7 @@ static void ui_leds(void)
         led_pos_init();
         ready = 1;
     }
-    if (m8_active() && !ui.menu) {                      /* M8 MODE (m8mode.c): the map's buttons glow; FX lit on FX A,
+    if (m8_panel() && !ui.menu) {                       /* M8 MODE (m8mode.c): the map's buttons glow; FX lit on FX A,
                                                          * breathing on FX B; OCT- / OCT+ lit while the keys are moved
                                                          * down / up; PLAY green while the M8 plays, on each beat's
                                                          * first quarter while its clock comes */
@@ -2147,8 +2147,15 @@ static void ui_input(void)
                                                          * its map has gone) */
     midi_pc_poll();                                     /* ((1.3) MIDI Program Change) */
     ml_poll();                                          /* ((1.3) MIDI LEARN: a CC came for the picked parameter) */
-    if (m8_active() && !ui.menu) {                      /* M8 MODE: the panel is an M8's (m8mode.c) */
+    if (!m8_active())                                   /* (M8 MODE off: on again, the M8's panel first) */
+        m8.fm1 = 0;
+    m8_panel_on = (uint8_t)m8_panel();                  /* (seq.c keyboard_block: no layers on the M8's panel) */
+    if (m8_panel() && !ui.menu) {                       /* M8 MODE: the panel is an M8's (m8mode.c) */
         m8_input(pressed);
+        return;
+    }
+    if (m8_active() && !ui.menu && m8_fm1_input(pressed)) {   /* (M8 MODE, the FM-1's panel: HOME twice, the M8's) */
+        home_long = 0;
         return;
     }
     if (m8.was_on)                                      /* (M8 MODE: the MENU opened or it went off: let go) */

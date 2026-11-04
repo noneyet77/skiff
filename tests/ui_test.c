@@ -1590,7 +1590,7 @@ static int test_menu_tabs(void)
                  "tab gaps constant (S, LARGE)",
                  ok && MTAB_COUNT == 5u && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
                  mtab_rows(MTAB_DISPLAY) == 7u && mtab_rows(MTAB_CONTROL) == 6u && mtab_rows(MTAB_AUDIO) == 6u &&   /* (#27; (2.0) RETURN) */
-                 mtab_rows(MTAB_SYSTEM) == 6u + FELUCCA_CDC && mtab_rows(MTAB_MIDI) == 17u);   /* (M8 MODE) */   /* ((Skiff) SYSTEM: CPU
+                 mtab_rows(MTAB_SYSTEM) == 6u + FELUCCA_CDC && mtab_rows(MTAB_MIDI) == 19u);   /* (M8 MODE, M8 KEYS, M8 SOUND) */   /* ((Skiff) SYSTEM: CPU
                                                          * CLOCK; (Skiff 2.0) USB SERIAL with the console only; (2.2)
                                                          * MIDI: CLOCK OUT, AUTO CHANNEL, NOTES OUT, CC OUT, THRU, REMOTE) */
 

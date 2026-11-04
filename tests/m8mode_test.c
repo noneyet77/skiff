@@ -257,19 +257,150 @@ int main(void)
         shot(getenv("M8_SHOT"));
     }
 
+    /* HOME twice quickly: the FM-1's own panel, M8 MODE still on; twice again: back */
+    press(B_HOME);
+    fr();
+    press(B_HOME);
+    fr();
+    m8check("HOME twice quickly: the FM-1's panel, M8 MODE still on, no MENU", m8.fm1 && m8_active() && !m8_panel() && !ui.menu);
+    clear();
+    fm1_in.notes = 1u;
+    blk();
+    m8check(".. there the keys still go to the M8 (KEYS DIRECT)", has(0x90, 53, 99) && !sounding());
+    fm1_in.notes = 0;
+    blk();
+    frames(400);
+    press(B_HOME);
+    fr();
+    press(B_HOME);
+    fr();
+    frames(400);
+    m8check(".. and HOME twice there: the M8's panel again, no MENU", !m8.fm1 && m8_panel() && !ui.menu);
+    clear();
+
     btn_down(B_EDIT);
     fr();
     btn_down(B_HOME);
     fr();
-    m8check("HOME opens the MENU and sends nothing for itself", ui.menu && !has(0x9F, 36 + B_HOME, 127));
-    m8check(".. EDIT held when the MENU opened: its note ends", has(0x8F, 40, 0));
+    m8check("HOME pressed: no MENU yet (a second tap may come), nothing sent for it", !ui.menu && !has(0x9F, 36 + B_HOME, 127));
     btn_up(B_HOME);
+    fr();
+    frames(400);
+    m8check(".. let go and no second tap: the MENU", ui.menu);
+    blk();
+    m8check(".. EDIT held when the MENU opened: its note ends", has(0x8F, 40, 0));
     btn_up(B_EDIT);
     fr();
     clear();
     turn(EN_K1, 2);
     blk();
     m8check("in the MENU the knobs are the MENU's: no CC", evn == 0u);
+
+    /* M8 KEYS TRACK: the keys play the selected track (its chord, arp, scale); an EXT channel sends it to the M8 only */
+    ui.menu = 0;
+    ui.force = 1;
+    menu_put(MI_M8KEYS, 1);
+    fr();
+    clear();
+    fm1_in.notes = 1u;
+    blk();
+    m8check("KEYS TRACK, T1 a sound: the key sounds here, no direct note to the M8", sounding() && !has(0x90, 53, 99));
+    fm1_in.notes = 0;
+    for (int i = 0; i < 200; i++)
+        blk();
+    menu_put(MI_TCH1, 17u);                           /* T1 CHANNEL: CH 1 EXT */
+    clear();
+    fm1_in.notes = 1u;
+    blk();
+    {
+        int on = 0;
+        for (uint32_t i = 0; i < evn; i++)
+            on |= ev[i].st == 0x90;
+        m8check(".. T1 on CH 1 EXT: the key goes to the M8 on channel 1, nothing sounds here", on && !sounding());
+    }
+    fm1_in.notes = 0;
+    blk();
+    {
+        int off = 0;
+        for (uint32_t i = 0; i < evn; i++)
+            off |= ev[i].st == 0x80;
+        m8check(".. and its note off when let go", off);
+    }
+    menu_put(MI_TCH1, 1u);                            /* (T1 back to CH 1, a sound) */
+    clear();
+    {
+        int32_t o = song.octave;
+        press(B_OCTUP);
+        blk();
+        m8check("KEYS TRACK: OCT+ moves the track's octave (song.octave), no channel or m8_oct change", song.octave == o + 1 && m8_oct == 0);
+        press(B_OCTDN);
+        blk();
+    }
+    btn_down(B_SCL);
+    fr();
+    press(B_OCTUP);
+    blk();
+    btn_up(B_SCL);
+    fr();
+    m8check(".. SEL + OCT+: the next track", song.sel == 1u);
+    btn_down(B_SCL);
+    fr();
+    press(B_OCTDN);
+    blk();
+    btn_up(B_SCL);
+    fr();
+    btn_down(B_LFO);                                  /* (SHIFT on the M8's panel: LFO opens no layer on the keys) */
+    fr();
+    clear();
+    fm1_in.notes = 1u;
+    blk();
+    m8check(".. a key with LFO (the M8's SHIFT) held still plays, no layer", song.sel == 0u && sounding());
+    fm1_in.notes = 0;
+    blk();
+    btn_up(B_LFO);
+    fr();
+    for (int i = 0; i < 200; i++)
+        blk();
+    menu_put(MI_M8KEYS, 0);
+    fr();
+    clear();
+
+    /* M8 SOUND: the M8's notes play the tracks here, never sent back out */
+    midi_enqueue(0x09u | 0x90u << 8 | 60u << 16 | 100u << 24, 1u);
+    blk();
+    m8check("M8 SOUND OFF: a note from the M8 does not sound", !sounding());
+    midi_enqueue(0x08u | 0x80u << 8 | 60u << 16, 1u);
+    blk();
+    menu_put(MI_M8SOUND, 1);
+    MIDI_BYTE = (uint8_t)((MIDI_BYTE & ~3u) | NO_ALL);   /* (NOTES OUT ALL: still not sent back) */
+    clear();
+    midi_enqueue(0x09u | 0x90u << 8 | 60u << 16 | 100u << 24, 1u);
+    blk();
+    m8check("M8 SOUND ON: a note from the M8 on channel 1 plays T1", sounding());
+    m8check(".. and is not sent back to the M8 (NOTES OUT ALL)", !has(0x90, 60, 100));
+    midi_enqueue(0x08u | 0x80u << 8 | 60u << 16, 1u);
+    blk();
+    menu_put(MI_M8SOUND, 0);
+    MIDI_BYTE = (uint8_t)((MIDI_BYTE & ~3u) | NO_OFF);
+    for (int i = 0; i < 200; i++)
+        blk();
+    clear();
+
+    /* the sequencer follows the M8 (CLOCK USB): the M8's start runs it, its stop stops it */
+    menu_put(MI_CLOCK, 1u);                           /* (USB) */
+    clear();
+    midi_enqueue(0x0Fu | 0xFAu << 8, 1u);
+    for (int i = 0; i < 6; i++) {
+        midi_enqueue(0x0Fu | 0xF8u << 8, 1u);
+        blk();
+    }
+    m8check("CLOCK USB: the M8's start runs the sequencer here too", song.playing && m8_play);
+    midi_enqueue(0x0Fu | 0xFCu << 8, 1u);
+    blk();
+    blk();
+    m8check(".. and its stop stops it", !song.playing && !m8_play);
+    menu_put(MI_CLOCK, 0u);
+    clear();
 
     menu_put(MI_M8, 0);
     ui.menu = 0;
