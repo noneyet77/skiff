@@ -395,6 +395,38 @@ static void ui_leds(void)
         led_pos_init();
         ready = 1;
     }
+    if (m8_active() && !ui.menu) {                      /* M8 MODE (m8mode.c): the map's buttons glow; FX lit on FX A,
+                                                         * breathing on FX B; OCT- / OCT+ lit while the keys are moved
+                                                         * down / up; PLAY green while the M8 plays, on each beat's
+                                                         * first quarter while its clock comes */
+        for (k = 0; k < NB; k++)
+            if (M8_BTN_MAP[k][0])
+                led_put(nd, panel.btn[k], 1);
+        led_put(m8.fx == 1u ? nl : nb, panel.btn[B_FX], m8.fx != 0u);
+        led_put(nl, panel.btn[B_SCL], m8.sel);
+        led_put(nl, panel.btn[B_OCTDN], m8_oct < 0);
+        led_put(nl, panel.btn[B_OCTUP], m8_oct > 0);
+        if (m8_play && (fm1_ms - m8_clk_ms > 500u || m8_pulse < 6u))
+            nl[LED_PLAY_GREEN >> 3] |= (uint8_t)(1u << (LED_PLAY_GREEN & 7u));
+        if (m8_play)
+            led_clear(nd, panel.btn[B_PLAY]);
+        for (c = 0; c < FM1_NCOL; c++) {
+            nd[c] &= (uint8_t)~(nl[c] | nb[c]);
+            nl[c] &= (uint8_t)~nb[c];
+        }
+#if BOARD_SMK37
+        smk_leds_out(nl, nd, nb, nm);
+#else
+        fm1_led_dim_level(0);
+        for (c = 0; c < FM1_NCOL; c++) {
+            fm1_led_dim[c] = nd[c];
+            fm1_led_breath[c] = nb[c];
+            fm1_led_mid[c] = 0;
+            fm1_led[c] = nl[c];
+        }
+#endif
+        return;
+    }
     if (!ui.layer || FAM_BTN[fam] != layer_btn())
         led_put(nl, panel.btn[FAM_BTN[fam]], 1);
     if ((k = arp_led()) != 2u && (!ui.layer || layer_btn() != B_ARP))

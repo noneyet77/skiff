@@ -192,7 +192,62 @@ int main(void)
     blk();
     turn(EN_K1, 1);
     blk();
-    m8check("FX again: KNOB 1 is VALUE again (CC 23 = 1)", !m8.fx && has(0xBF, 23, 1));
+    m8check("FX again: FX B, KNOB 1 is CC 74 (its own value, 64 + 2)", m8.fx == 2u && has(0xBF, 74, 66));
+
+    clear();
+    press(B_FX);
+    blk();
+    turn(EN_K1, 1);
+    blk();
+    m8check("FX a third time: the M8's page, KNOB 1 is VALUE again (CC 23 = 1)", !m8.fx && has(0xBF, 23, 1));
+    clear();
+    press(B_FX);
+    blk();
+    turn(EN_K1, -1);
+    blk();
+    m8check(".. and FX A kept its knob (CC 70: 70 - 2 = 68)", m8.fx == 1u && has(0xBF, 70, 68));
+    press(B_FX);
+    blk();
+    press(B_FX);
+    blk();
+    clear();
+
+    turn(EN_PRESET, -10);
+    blk();
+    fm1_in.notes = 1u;
+    blk();
+    m8check("PRESET ten detents back: the keys' velocity 100 - 40 = 60, and no CC for it", has(0x90, 53, 60) && evn == 1u);
+    fm1_in.notes = 0;
+    blk();
+    turn(EN_PRESET, 100);
+    blk();
+    m8check(".. turned far up: 127 at most", m8_vel == 127u);
+    turn(EN_PRESET, -7);
+    blk();
+    m8check(".. and back to 99", m8_vel == 99u);
+    clear();
+
+    midi_enqueue(0x0Fu | 0xFAu << 8, 1u);
+    blk();
+    m8check("the M8's start: PLAY's green on", m8_play == 1u);
+    ui_leds();
+    m8check(".. and lit (PLAY's green LED, no clock yet)",
+            (fm1_led[LED_PLAY_GREEN >> 3] >> (LED_PLAY_GREEN & 7u)) & 1u);
+    for (int i = 0; i < 7; i++)
+        midi_enqueue(0x0Fu | 0xF8u << 8, 1u);
+    blk();
+    m8check(".. its clock counted (7 clocks: the 7th 24th of the beat)", m8_pulse == 6u);
+    ui_leds();
+    m8check(".. past the beat's first quarter: the green dark until the next beat",
+            !((fm1_led[LED_PLAY_GREEN >> 3] >> (LED_PLAY_GREEN & 7u)) & 1u));
+    midi_enqueue(0x09u | 0x90u << 8 | 60u << 16 | 100u << 24, 1u);
+    blk();
+    m8check(".. a note from the M8 does not sound here", !sounding());
+    m8check(".. nor does its clock or start run the sequencer here", !song.playing);
+    midi_enqueue(0x0Fu | 0xFCu << 8, 1u);
+    blk();
+    m8check("the M8's stop: PLAY's green off", m8_play == 0u);
+    clear();
     turn(EN_K1, 0);
     clear();
 

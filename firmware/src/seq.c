@@ -1151,6 +1151,9 @@ static void kb_outer(void)
  * m8_oct octaves away; nothing sounds here. m8_kn, m8_kc: the note and channel each held key sent (its note off, whatever
  * the octave or channel is by then) */
 static int8_t m8_oct;
+static uint8_t m8_vel = 100u;                           /* the keys' velocity (PRESET) */
+static uint8_t m8_play, m8_pulse;                       /* the M8 playing (its start / stop), its clock's 24ths of a beat */
+static uint32_t m8_clk_ms;                              /* its last clock */
 static uint8_t m8_kn[27], m8_kc[27];
 /* the keys' channel, 0..15: favorites.factory[15][29], the retired STYLE byte, as 0x80 | channel (a value saved before,
  * bit 7 clear, is channel 1) */
@@ -1175,7 +1178,7 @@ static void m8_keys(uint32_t cur, uint32_t ch)
             m8_kn[k] = (uint8_t)n;
             m8_kc[k] = (uint8_t)m8_kch();
             m8_kon |= 1u << k;
-            (void)mo_put(0x09u | (0x90u | m8_kc[k]) << 8 | (uint32_t)n << 16 | 100u << 24, mo.tick);
+            (void)mo_put(0x09u | (0x90u | m8_kc[k]) << 8 | (uint32_t)n << 16 | (uint32_t)m8_vel << 24, mo.tick);
         } else if ((m8_kon >> k) & 1u) {
             m8_kon &= ~(1u << k);
             (void)mo_put(0x08u | (0x80u | m8_kc[k]) << 8 | (uint32_t)m8_kn[k] << 16, mo.tick);
@@ -2099,6 +2102,19 @@ static __attribute__((noinline)) void events_block(uint32_t n)
         uint32_t d1 = (pkt >> 16) & 0x7Fu, d2 = (pkt >> 24) & 0x7Fu;
         uint32_t source = midi_in_source[at] ? midi_in_source[at] : 1u, ms = midi_in_ms[at];
         mi_r++;
+        if (MSET(15, 17) & MO_M8_ON) {                /* (M8 MODE) the M8's transport for PLAY's LED, nothing else */
+            if (status == 0xFAu || status == 0xFBu) {
+                m8_play = 1;
+                if (status == 0xFAu)
+                    m8_pulse = 23u;                   /* (its next clock: a beat's first) */
+            } else if (status == 0xFCu)
+                m8_play = 0;
+            else if (status == 0xF8u) {
+                m8_pulse = (uint8_t)(m8_pulse >= 23u ? 0u : m8_pulse + 1u);
+                m8_clk_ms = ms;
+            }
+            continue;
+        }
         if (status >= 0xF8u) {
             if (clock_mode == source) {
                 if (status == 0xF8u)
