@@ -124,6 +124,36 @@ int main(void)
     m8check("a fast turn of 100: split in messages of 63 at most (CC 24 = 63, then 37)", has(0xBF, 24, 63) && has(0xBF, 24, 37));
     clear();
 
+    press(B_FX);
+    blk();
+    m8check("FX: the FX page, and no note for it", m8.fx && evn == 0u);
+    turn(EN_K1, 3);
+    blk();
+    m8check("FX page, KNOB 1 three detents: CC 70 = 64 + 6, absolute, channel 16", has(0xBF, 70, 70) && evn == 1u);
+    clear();
+    turn(EN_K4, 100);
+    blk();
+    turn(EN_K4, 5);
+    blk();
+    m8check(".. KNOB 4 far past the end: CC 73 = 127 once, nothing more", has(0xBF, 73, 127) && evn == 1u);
+    clear();
+    turn(EN_SELECT, 1);
+    blk();
+    m8check(".. SELECT still moves the M8's cursor (CC 20 = 1)", has(0xBF, 20, 1));
+    clear();
+    if (getenv("M8_SHOT_FX")) {
+        ui.force = 1;
+        fr();
+        shot(getenv("M8_SHOT_FX"));
+    }
+    press(B_FX);
+    blk();
+    turn(EN_K1, 1);
+    blk();
+    m8check("FX again: KNOB 1 is VALUE again (CC 23 = 1)", !m8.fx && has(0xBF, 23, 1));
+    turn(EN_K1, 0);
+    clear();
+
     if (getenv("M8_SHOT")) {                          /* the screen, drawn afresh */
         ui.force = 1;
         fr();

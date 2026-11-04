@@ -7,6 +7,9 @@
  *   encoders  CC M8_CC0 + the role (panel.c EN_SELECT .. EN_K4; 20 .. 26) on channel 16, relative: 1..63 a turn
  *             clockwise, 127..65 anticlockwise (two's complement), one step a detent.
  *   keys      notes on channel 1 (seq.c m8_keys, in the audio ISR as the keys always are), F3 + the key, velocity 100.
+ *   FX        switches KNOB 1..4 to the FX page and back: there they send absolute CCs M8_FX_CC0 .. +3 on channel 16
+ *             (0..127, M8_FX_STEP a detent, each knob keeping its value), for the M8's PROJECT > MIDI > MAPPINGS to
+ *             tie to an effect send, a filter, a mod; m8emu passes CCs it has no mapping for to the M8.
  *
  * M8_MAP is the layout m8emu loads for this unit (its FM-1 preset: hosts/sdl/common/midi_map.c); the screen draws it. */
 #define M8_CH_CTL 15u                                   /* channel 16 */
@@ -14,13 +17,18 @@
 #define M8_CC0 20u
 #define M8_OCT_MIN (-4)
 #define M8_OCT_MAX 4
-static const char *const M8_BTN_MAP[NB] = {"", "", "UP", "SHIFT", "EDIT", "OPTION", "MENU", "LEFT",
+#define M8_FX_CC0 70u
+#define M8_FX_STEP 2
+static const char *const M8_BTN_MAP[NB] = {"FX PAGE", "", "UP", "SHIFT", "EDIT", "OPTION", "MENU", "LEFT",
                                            "DOWN", "RIGHT", "PLAY", "", "OCT-", "OCT+"};
 static const char *const M8_ENC_MAP[NE] = {"CURSOR U/D", "CURSOR L/R", "", "VALUE", "VALUE +16", "SCREEN U/D",
                                            "SCREEN L/R"};
 
 static struct {
     uint8_t was_on, dirty;
+    uint8_t fx;                                         /* KNOB 1..4 on the FX page */
+    uint8_t fx_val[4];                                  /* their values there, as last sent */
+    uint8_t fx_init;
     uint32_t prev;                                      /* the matrix buttons held, as last sent */
     char last[24];                                      /* the last control used, for the screen */
 } m8;
@@ -46,6 +54,14 @@ static void m8_button(uint32_t b, int down)
         }
         return;
     }
+    if (b == B_FX) {                                    /* the knob page: no note */
+        if (down) {
+            m8.fx ^= 1u;
+            str_cpy(m8.last, m8.fx ? "KNOBS: FX" : "KNOBS: M8", sizeof m8.last);
+            ui.force = 1;
+        }
+        return;
+    }
     if (b == B_HOME) {                                  /* the way out: the MENU, where M8 MODE is */
         if (down) {
             ui.msg_t = 0;
@@ -65,6 +81,26 @@ static void m8_button(uint32_t b, int down)
 
 static void m8_enc(uint32_t role, int32_t s)
 {
+    if (m8.fx && role >= EN_K1 && role <= EN_K4) {     /* the FX page: an absolute value */
+        uint32_t k = role - EN_K1;
+        int32_t v = (int32_t)m8.fx_val[k] + s * M8_FX_STEP;
+        v = v < 0 ? 0 : v > 127 ? 127 : v;
+        if ((uint8_t)v != m8.fx_val[k]) {
+            m8.fx_val[k] = (uint8_t)v;
+            m8_send(0x0Bu | (0xB0u | M8_CH_CTL) << 8 | (M8_FX_CC0 + k) << 16 | (uint32_t)v << 24);
+        }
+        m8.last[0] = 'C';
+        m8.last[1] = 'C';
+        m8.last[2] = (char)('0' + (M8_FX_CC0 + k) / 10u);
+        m8.last[3] = (char)('0' + (M8_FX_CC0 + k) % 10u);
+        m8.last[4] = ' ';
+        m8.last[5] = (char)('0' + v / 100);
+        m8.last[6] = (char)('0' + v / 10 % 10);
+        m8.last[7] = (char)('0' + v % 10);
+        m8.last[8] = 0;
+        m8.dirty = 1;
+        return;
+    }
     while (s) {                                         /* at most 63 steps a message */
         int32_t n = s > 63 ? 63 : s < -63 ? -63 : s;
         m8_send(0x0Bu | (0xB0u | M8_CH_CTL) << 8 | (M8_CC0 + role) << 16 | (uint32_t)(n & 127) << 24);
@@ -80,6 +116,10 @@ static void m8_leave(void);
 static void m8_input(uint32_t pressed)
 {
     uint32_t cur = fm1_in.buttons, id, r;
+    if (!m8.fx_init) {                                  /* the FX page's knobs start in the middle */
+        m8.fx_init = 1;
+        m8.fx_val[0] = m8.fx_val[1] = m8.fx_val[2] = m8.fx_val[3] = 64u;
+    }
     if (!m8.was_on) {                                   /* just turned on (or back from the MENU): from what is held */
         m8.was_on = 1;
         m8.prev = cur;
@@ -146,9 +186,7 @@ static void m8_draw(void)
         return;
     if (ui.force) {
         lcd_fill(0, 0, 240, 240, T_BG);
-        draw_text_line(0, 6, 240, &AF_M, "M8 MODE", T_THEME, T_BG, 1);
-        for (i = 0; i < 4u; i++)                        /* KNOB 1..4, as on the panel */
-            m8_cell(i * 60u, 30u, 60u, E_NAME[EN_K1 + i], M8_ENC_MAP[EN_K1 + i]);
+        draw_text_line(0, 6, 240, &AF_M, m8.fx ? "M8 MODE: FX" : "M8 MODE", T_THEME, T_BG, 1);
         m8_cell(0, 72u, 120u, E_NAME[EN_SELECT], M8_ENC_MAP[EN_SELECT]);
         m8_cell(120u, 72u, 120u, E_NAME[EN_ALGO], M8_ENC_MAP[EN_ALGO]);
         for (i = 0; i < 6u; i++) {
@@ -156,6 +194,18 @@ static void m8_draw(void)
             m8_cell(i * 40u, 160u, 40u, B_NAME[ROW2[i]], M8_BTN_MAP[ROW2[i]]);
         }
         draw_text_line(0, 224, 240, &AF_S, "HOME: MENU > MIDI > M8 MODE", T_TEXT, T_BG, 1);
+    }
+    for (i = 0; i < 4u; i++) {                          /* KNOB 1..4, as on the panel; on the FX page CC and value */
+        if (m8.fx) {
+            uint32_t v = m8.fx_val[i];
+            t[0] = 'C'; t[1] = 'C';
+            t[2] = (char)('0' + (M8_FX_CC0 + i) / 10u); t[3] = (char)('0' + (M8_FX_CC0 + i) % 10u);
+            t[4] = ' ';
+            t[5] = (char)('0' + v / 100u); t[6] = (char)('0' + v / 10u % 10u); t[7] = (char)('0' + v % 10u);
+            t[8] = 0;
+            m8_cell(i * 60u, 30u, 60u, E_NAME[EN_K1 + i], t);
+        } else if (ui.force)
+            m8_cell(i * 60u, 30u, 60u, E_NAME[EN_K1 + i], M8_ENC_MAP[EN_K1 + i]);
     }
     str_cpy(t, "KEYS OCT ", sizeof t);
     t[9] = (char)(m8_oct < 0 ? '-' : '+');
